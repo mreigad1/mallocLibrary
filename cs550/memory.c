@@ -1,4 +1,5 @@
 #include "memory.h"
+#include "stdio.h"
 
 /* THIS SECTION FOR FILE TYPES */
 	typedef struct chunk{
@@ -88,19 +89,19 @@
 	}
 
 	void* malloc(size_t size){
-	
+        return NULL;
 	}
 
 	void free(void *ptr){
-
+        ;
 	}
 
 	void* calloc(size_t nmemb, size_t size){
-
+        return NULL;
 	}
 
 	void* realloc(void *ptr, size_t size){
-
+        return NULL;
 	}
 
 	//TODO:
@@ -110,7 +111,7 @@
 		int i = 0;
 		for(i = 0; i < 10; i++){
 			arr[i].size = ((((1 << (i+6)) % 100) / 10) * 16) + 2;
-			printf("%u,%d,%d\n", &arr[i], i, arr[i].size);
+			printf("%u,%d,%d\n", (unsigned int)&arr[i], i, arr[i].size);
 		}
 
 		printf("\n**creating*\n");
@@ -121,7 +122,7 @@
 
 		chunk* head = freeListHead;
 		while(head != NULL){
-			printf("%u,%d\n", head, head->size);
+			printf("%u,%d\n", (unsigned int)head, head->size);
 			head = head->next;
 		}
 		printf("\n**getting*\n");
@@ -129,13 +130,13 @@
 		chunk* chs[10];
 		for(i = 0; i <= 9; i++){
 			chs[i] = getFreeChunk(i+1);
-			printf("%u,%d,%d\n", chs[i], ((chs[i] != NULL)?(chs[i]->size):(0)), i);
+			printf("%u,%d,%d\n", (unsigned int)chs[i], ((chs[i] != NULL)?(chs[i]->size):(0)), i);
 		}
 
 		printf("\n**iterating free*\n");
 		head = freeListHead;
 		while(head != NULL){
-			printf("%u,%d\n", head, head->size);
+			printf("%u,%d\n", (unsigned int)head, head->size);
 			head = head->next;
 		}
 
