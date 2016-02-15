@@ -3,7 +3,7 @@
 all: clean memory
 
 memory: 
-	gcc malloc.c -o tester
+	gcc malloc.c -g -o tester
 
 # Specify the object files and executables that are generated
 # and need to be removed to re-compile the whole thing

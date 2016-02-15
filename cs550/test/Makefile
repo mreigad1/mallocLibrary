@@ -8,4 +8,4 @@ DEBUG=\
 
 .PHONY: a.out
 a.out:
-	$(CC) -O $(DEBUG) -std=c99 -D_XOPEN_SOURCE=500 -Wall -Wextra test.c malloc.c utility.c
+	$(CC) -g -O $(DEBUG) -std=c99 -D_XOPEN_SOURCE=500 -Wall -Wextra test.c malloc.c utility.c
