@@ -1,6 +1,3 @@
-#include "malloc.h"
-//#include "stdio.h"
-//#include "stdlib.h"
 #include "unistd.h"
 //#include "time.h"
 #define TESTING 0
@@ -11,11 +8,16 @@
 		struct chunk* LeftAddress;
 		struct chunk* RightAddress;
 		struct chunk* nextAddress;
-		//struct chunk* leftBySize;
-		//struct chunk* rightBySize;
 		size_t size;
 		char memory[0];
 	}chunk;
+
+	typedef struct bucket{
+		struct bucket* next;
+		struct chunk* list;
+		long lower;
+		long upper;		
+	}bucket;
 
 /* THIS SECTION FOR FUNCTION DECLARATIONS */
 
@@ -36,6 +38,8 @@
 	chunk* listHead = NULL;
 	void* heapEnd = NULL;
 	void* breakVar = 0;
+	bucket pSizeHead = { NULL, NULL, 0, 8 };
+	bucket* sizeHead = &pSizeHead;
 
 /* THIS SECTION FOR FUNCTION IMPLEMENTATIONS */
 
@@ -49,48 +53,15 @@
 	chunk* highestAddress(chunk* root){
 		if(root == NULL){
 			return NULL;
-		}else if(RightAddress != NULL){
-			return RightAddress;
+		}else if(root->RightAddress != NULL){
+			return root->RightAddress;
 		}else{
 			return root;
 		}
 	}
 
-	//flattens tree into list, merges nodes, creates new tree
-	void defragmentMemory(){
-		chunk* greatestNode = highestAddress(addressRoot);
-		while(greatestNode != NULL){
-			removeChunk(greatestNode);
-			greatestNode->LeftAddress = greatestNode->RightAddress = NULL;
-			greatestNode->nextAddress = listHead;
-			listHead = greatestNode;
-			greatestNode = highestAddress(addressRoot);
-		}
-		chunk* tmp = listHead;
-		while(tmp != NULL){
-			void* nxt = (void*)(tmp->nextAddress);
-			if((tmp->memory + tmp->size) == nxt){
-				chunk* nextChunk = (chunk*)nxt;
-				tmp->size += (sizeof(chunk) + nextChunk->size);
-				tmp->nextAddress = nextChunk->nextAddress;
-				nextChunk->nextAddress = NULL;
-			}
-			tmp = tmp->nextAddress;
-		}
-		while(listHead != NULL){
-			chunk* toTree = listHead;
-			listHead = toTree->nextAddress;
-			toTree->nextAddress = NULL;
-			insertChunk(toTree);
-		}
-	}
-
 	//Returns -1 if c has children (will not insert), 0 if c is dropped, 1 if inserted, will not merge adjacent blocks
 	int addressInsert(chunk* c, chunk* root){
-		//void* lower  = (c < root)?c:root;
-		//void* higher = (c > root)?c:root;
-		//chunk* Lower = (chunk*)lower;
-		//chunk* Higher = (chunk*)higher;
 
 		if(root == NULL || c == NULL){
 			return 0;	//root or child is NULL
@@ -126,25 +97,37 @@
 		if(c == NULL){
 			return 0;
 		}
+
 		void* ptr = c;
 		size_t s = sizeof(chunk) + c->size;
 		void* end = ptr + s;
-		if(end == heapEnd){	//determine if chunk is to be given back to OS
+
+		int retVal = 0;
+	
+		if(end == heapEnd){	//determine if chunk is to be given back to OS, 
 			intptr_t ns = -s;
 			sbrk(ns);
-			heapEnd = ptr;
-			return 2;		//do nothing more if memory returned to system
+			heapEnd = sbrk(0);
+			retVal = 2;		//do nothing more if memory returned to system
 		}else{	//not returned to OS, place chunk in tree
-			return addressInsert(c, addressRoot);
+			if(addressRoot == NULL){
+				addressRoot = c;
+				retVal = 1;
+			}else{
+				retVal = addressInsert(c, addressRoot);
+			}
 		}
+
+		return retVal;
 	}
 
-	//remove nodes from and place into root
-	void insertAddressTree(chunk* fromTree){
+	//places greater 'fromTree' into lesser 'intoTree' subtree
+	void insertAddressTree(chunk* fromTree, chunk *intoTree){
 		if(fromTree == NULL){
 			return;
 		}
-
+        
+        /*
 		chunk* L = fromTree->LeftAddress;
 		chunk* R = fromTree->RightAddress;
 
@@ -154,6 +137,10 @@
 		insertChunk(fromTree);
 		insertAddressTree(L);
 		insertAddressTree(R);
+         */
+        
+        chunk* greatestNode = highestAddress(intoTree);
+        greatestNode->RightAddress = fromTree;
 	}
 
 	//will remove specified chunk from tree 'root'
@@ -173,20 +160,18 @@
 			addressRoot->LeftAddress = addressRoot->RightAddress = NULL;
 			if(L != NULL){
 				addressRoot = L;
-				insertAddressTree(R);
+				insertAddressTree(R, L);
 			}else{
 				addressRoot = R;
-				insertAddressTree(L);
 			}
 		}else if(c < root){
 			if(c == L){
 				L->LeftAddress = L->RightAddress = NULL;
 				if(LL != NULL){
 					root->LeftAddress = LL;
-					insertAddressTree(LR);
+					insertAddressTree(LR, LL);
 				}else{
 					root->LeftAddress = LR;
-					insertAddressTree(LL);
 				}				
 			}else{
 				removeAddress(c, L);
@@ -196,10 +181,9 @@
 				R->LeftAddress = R->RightAddress = NULL;
 				if(RL != NULL){
 					root->RightAddress = RL;
-					insertAddressTree(RR);
+					insertAddressTree(RR, RL);
 				}else{
 					root->RightAddress = RR;
-					insertAddressTree(RL);
 				}
 			}else{
 				removeAddress(c, R);
@@ -211,6 +195,56 @@
 		removeAddress(c , addressRoot);
 	}
 
+	//flattens tree into list, merges nodes, creates new tree
+	void defragmentMemory(){
+		chunk* greatestNode = highestAddress(addressRoot);
+		while(greatestNode != NULL){
+			removeChunk(greatestNode);
+			greatestNode->LeftAddress = greatestNode->RightAddress = NULL;
+			greatestNode->nextAddress = listHead;
+			listHead = greatestNode;
+			greatestNode = highestAddress(addressRoot);
+		}
+		chunk* tmp = listHead;
+		while(tmp != NULL){
+			void* nxt = (void*)(tmp->nextAddress);
+			if((tmp->memory + tmp->size) == nxt){
+				chunk* nextChunk = (chunk*)nxt;
+				tmp->size += (sizeof(chunk) + nextChunk->size);
+				tmp->nextAddress = nextChunk->nextAddress;
+				nextChunk->nextAddress = NULL;
+			}
+			nxt = (void*)(tmp->nextAddress);
+			if((tmp->memory + tmp->size) != nxt){
+				tmp = tmp->nextAddress;
+			}
+		}
+		while(listHead != NULL){
+			chunk* toTree = listHead;
+			listHead = toTree->nextAddress;
+			toTree->nextAddress = NULL;
+			insertChunk(toTree);
+		}
+	}
+
+	//function returns memory to the OS
+	void returnMem(){
+		//defragmentation cut out in order to speed up performance
+		//defragmentMemory();	//defragment before returning memory to make fewer iterations
+		chunk* greatestNode = highestAddress(addressRoot);
+		if(greatestNode != NULL){
+			void* endOfNode = ((void*)greatestNode) + greatestNode->size + sizeof(chunk);
+			while(greatestNode != NULL && endOfNode == (heapEnd = sbrk(0))){
+				removeChunk(greatestNode);
+				//intptr_t removeSize = -((intptr_t)(greatestNode->size + sizeof(chunk)));
+				brk(greatestNode);
+				heapEnd = greatestNode;
+				greatestNode = highestAddress(addressRoot);
+				endOfNode = greatestNode->memory + greatestNode->size;
+			}
+		}
+	}
+
 	//search tree for large enough chunk, do NOT remove yet
 	chunk* getFreeChunkAux(size_t s, chunk* root){		
 		if(root == NULL){
@@ -218,15 +252,32 @@
 		}
 		chunk* retVal = NULL;
 
-		if(root->size >= s){
-			retVal = root;
+        //try children nodes first, less work to remove them
+        if(retVal == NULL){
+            if(root->size >= s){
+                retVal = root;
+            }
+        }
+        
+		chunk* child = NULL;
+		if(root->LeftAddress != NULL && root->RightAddress != NULL){
+			//greedy attempt, perhaps larger child has larger children if there exist algorithm memory layout bias
+			//small speed increase gained in test (~5%)
+			child = (root->LeftAddress->size > root->RightAddress->size)?(root->LeftAddress):(root->RightAddress);
+			retVal = getFreeChunkAux(s, child);//try tree of fatter child
+			if(retVal == NULL){
+				child = (child == root->LeftAddress)?(root->RightAddress):(root->LeftAddress);
+				retVal = getFreeChunkAux(s, child);
+			}
+		}else if(retVal == NULL){
+			if(retVal == NULL){
+				retVal = getFreeChunkAux(s, root->LeftAddress);
+			}
+			if(retVal == NULL){
+				retVal = getFreeChunkAux(s, root->RightAddress);
+			}
 		}
-		if(retVal == NULL){
-			retVal = getFreeChunkAux(s, root->LeftAddress);
-		}
-		if(retVal == NULL){
-			retVal = getFreeChunkAux(s, root->RightAddress);
-		}
+
 		return retVal;
 	}
 
@@ -244,18 +295,7 @@
 		if(retVal != NULL){
 
 			removeChunk(retVal);
-			size_t adjustedReqSize = s + sizeof(chunk);
-			size_t retrievedChunkSize = retVal->size + sizeof(chunk);
-			size_t minimumSplitRemainder = 2*sizeof(chunk);
 
-			if(retrievedChunkSize > (minimumSplitRemainder + adjustedReqSize)){	//split chunks, don't bother if created chunk usable space smaller than overhead of chunk
-				void* newChunk = (void*)retVal;
-				newChunk += adjustedReqSize;							//get address of new chunk
-				chunk* nChunk = (chunk*)newChunk;						//cast new chunk back to record ptr
-				retVal->size = s;								//resize old block to requested size
-				nChunk->size = retrievedChunkSize - (sizeof(chunk) + sizeof(chunk) + s);	//size new block to 
-				insertChunk(nChunk);
-			}
 		}
 
 		return retVal;
@@ -275,24 +315,36 @@
 	//function makes system call to retrieve new memory chunk
 	//preloads chunk size
 	void* CallForChunk(size_t size){
-		size_t s = nextEight(size);
+		size_t s = nextEight(size + sizeof(chunk));
 		void* retVal = NULL;
-		retVal = sbrk(s);
-		
+        int multiple = 4;
+		retVal = sbrk( multiple * s );
+		heapEnd = sbrk(0);
+
+		if(retVal == (void*)-1){	//this happens when too much memory has been requested
+			retVal = NULL;
+		}		
+
 		if(retVal != NULL){
-			heapEnd = sbrk(0);
-			chunk* c = retVal;
-			c->size = s;
+            int m;
+            for(m = 0; m < multiple; m++){
+                ((chunk*)(retVal + (m * s)))->size = s - sizeof(chunk);
+                ((chunk*)(retVal + (m * s)))->LeftAddress = NULL ;
+                ((chunk*)(retVal + (m * s)))->RightAddress = NULL ;
+ 
+                if(m != 0){
+                    insertChunk((chunk*)(retVal + (m * s)));
+                }
+            }
 		}
 		return retVal;
 	}
 
 	//implemented
 	void* malloc(size_t size){
-		size_t s = nextEight(size + sizeof(chunk));
+		size_t s = nextEight(size);
 
 		if(s <= 0){
-			//breakHere(NULL);
 			return NULL;
 		}
 		
@@ -301,7 +353,10 @@
 		void* block = getFreeChunk( s );	//get chunk in space
 
 		if(block == NULL){
-			defragmentMemory();		//if no sufficiently large node found in free tree, try defragmenting and searching
+			//TODO:better defragmentation algorithm may generate resultant tree which is better balanced		
+            //defragmentMemory();
+            returnMem();
+            defragmentMemory();
 			block = getFreeChunk( s );
 		}
 
@@ -319,32 +374,23 @@
 	}
 
 	void free(void *ptr){
-
-		if(ptr == NULL || ptr == (NULL-sizeof(chunk))){
-			breakHere(ptr);
-		}
-
 		if(ptr == NULL){
 			return;
 		}
-		ptr -= sizeof(chunk);
-		chunk* c = (chunk*)ptr;
+		chunk* c = (chunk*)(ptr - sizeof(chunk));
 		insertChunk(c);
+
+		returnMem();
 	}
 
 	//implemented
 	void* calloc(size_t nmemb, size_t size){
 		if(nmemb == 0 || size == 0){
-			//breakHere(NULL);
 			return NULL;
 		}
 		size_t s = nextEight(size);
 		size_t totSize = nmemb * s;
 		void* retVal = malloc(totSize);
-
-		if(retVal == NULL){
-			//breakHere(NULL);
-		}
 
 		return retVal;
 	}
@@ -357,7 +403,6 @@
 		}
 		if(size <= 0){
 			free(ptr);
-			//breakHere(NULL);
 			return NULL;
 		}
 
@@ -372,41 +417,9 @@
 			for(i = 0; i < c->size; i++){   //c->size is smaller than new size 's'
 				newChunk->memory[i] = c->memory[i];
 			}
-			retVal = (&newChunk->memory[0]);
+			retVal = (newChunk->memory);
 			free(ptr);
-
-			if(retVal == NULL){
-				//breakHere(NULL);
-			}
 
 			return retVal;
 		}
 	}
-
-
-/*int main(){
-	int* arr[TESTNUM];
-	int sizes[TESTNUM];
-	int i;
-
-
-	for(i = 0; i < TESTNUM; i++){
-		arr[i] = malloc(sizeof(int));
-		arr[i][0] = sizeof(int) + sizes[i];
-	}
-
-	for(i = 0; i < TESTNUM; i++){
-		free(arr[i]);
-	}
-
-
-	for(i = 0; i < TESTNUM; i++){
-		arr[i] = malloc(sizeof(int));
-		arr[i][0] = sizeof(int) + i*i + 100;
-	}
-
-	for(i = 0; i < TESTNUM; i++){
-		free(arr[i]);
-	}
-}
-*/
