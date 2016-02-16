@@ -1,8 +1,6 @@
-#include "malloc.h"
-//#include "stdio.h"
-//#include "stdlib.h"
 #include "unistd.h"
 //#include "time.h"
+#define MAXBUCKETS 60
 #define TESTING 0
 #define TESTNUM 1000
 
@@ -11,11 +9,18 @@
 		struct chunk* LeftAddress;
 		struct chunk* RightAddress;
 		struct chunk* nextAddress;
+		struct chunk* bucketList;
 		//struct chunk* leftBySize;
 		//struct chunk* rightBySize;
 		size_t size;
 		char memory[0];
 	}chunk;
+
+	typedef struct bucket{
+		struct chunk* list;
+		unsigned long lower;
+		unsigned long upper;		
+	}bucket;
 
 /* THIS SECTION FOR FUNCTION DECLARATIONS */
 
@@ -36,14 +41,27 @@
 	chunk* listHead = NULL;
 	void* heapEnd = NULL;
 	void* breakVar = 0;
+	bucket bucks[MAXBUCKETS];
+	int bucketsInit = 0;
 
 /* THIS SECTION FOR FUNCTION IMPLEMENTATIONS */
+
+	void initBuckets(){
+		bucks[0].list = NULL;
+		bucks[0].lower = 0;
+		bucks[0].upper = 8;
+		int i;
+		for(i = 0; i < MAXBUCKETS; i++){
+			bucks[i].list = NULL;
+			bucks[i].lower = bucks[i-1].upper;
+			bucks[i].upper = bucks[i].lower * 2;
+		}
+	}
 
 	//function for debugging
 	void breakHere(void* value){
 		breakVar = value;
 	}
-
 
 	//returns reference to highest address node in tree
 	chunk* highestAddress(chunk* root){
@@ -58,10 +76,6 @@
 
 	//Returns -1 if c has children (will not insert), 0 if c is dropped, 1 if inserted, will not merge adjacent blocks
 	int addressInsert(chunk* c, chunk* root){
-		//void* lower  = (c < root)?c:root;
-		//void* higher = (c > root)?c:root;
-		//chunk* Lower = (chunk*)lower;
-		//chunk* Higher = (chunk*)higher;
 
 		if(root == NULL || c == NULL){
 			return 0;	//root or child is NULL
@@ -101,8 +115,9 @@
 		void* ptr = c;
 		size_t s = sizeof(chunk) + c->size;
 		void* end = ptr + s;
-
 		int retVal = 0;
+		int b = 0;
+
 	
 		if(end == heapEnd){	//determine if chunk is to be given back to OS, 
 			intptr_t ns = -s;
@@ -111,6 +126,16 @@
 			retVal = 2;		//do nothing more if memory returned to system
 		}else{	//not returned to OS, place chunk in tree
 			retVal = addressInsert(c, addressRoot);
+		
+			while(b < MAXBUCKETS && (bucks[b].upper + sizeof(chunk)) < s){	//find bucket and insert there
+				b++;
+			}
+			if(b < MAXBUCKETS){
+				c->bucketList = bucks[b].list;
+				bucks[b].list = c;
+			}else{
+				//no modern machine can handle this memory request and data primitives bottleneck first anyway
+			}
 		}
 
 		return retVal;
@@ -207,7 +232,10 @@
 				tmp->nextAddress = nextChunk->nextAddress;
 				nextChunk->nextAddress = NULL;
 			}
-			tmp = tmp->nextAddress;
+			nxt = (void*)(tmp->nextAddress);
+			if((tmp->memory + tmp->size) != nxt){
+				tmp = tmp->nextAddress;
+			}
 		}
 		while(listHead != NULL){
 			chunk* toTree = listHead;
@@ -245,7 +273,18 @@
 			return NULL;
 		}
 
-		retVal = getFreeChunkAux(s, addressRoot);
+		//retVal = getFreeChunkAux(s, addressRoot);
+		int b = 0;
+		while(b < MAXBUCKETS && (bucks[b].upper < s || bucks[b].list == NULL)){
+			b++;
+		}
+		if(b >= MAXBUCKETS){
+			retVal = NULL;
+		}else{
+			retVal = bucks[b].list;
+			bucks[b].list = bucks[b].list->bucketList;
+			retVal->bucketList = NULL;
+		}		
 
 		if(retVal != NULL){
 
@@ -270,6 +309,10 @@
 	//implemented
 	//function ceilings to next increment of 8
 	size_t nextEight(size_t s){
+		if(bucketsInit == 0){
+			initBuckets();
+			bucketsInit = 1;
+		}
 		size_t r = s;
 		while((r % 8) != 0){
 			r++;
@@ -284,14 +327,18 @@
 		size_t s = nextEight(size);
 		void* retVal = NULL;
 		retVal = sbrk(s);
-		
+
+		if(retVal == (void*)-1){	//this happens when too much memory has been requested
+			retVal = NULL;
+		}		
+
 		if(retVal != NULL){
 			heapEnd = sbrk(0);
 			chunk* c = retVal;
 			if(c == (void*)0x17 || &(c->size) == (void*)0x17){
 				breakHere((void*)0x17);
 			}
-			c->size = s;
+			c->size = s - sizeof(chunk);//wrong, s already includes sizeof(chunk)
 		}
 		return retVal;
 	}
@@ -310,7 +357,19 @@
 		void* block = getFreeChunk( s );	//get chunk in space
 
 		if(block == NULL){
-			defragmentMemory();		//if no sufficiently large node found in free tree, try defragmenting and searching
+			//defragmentMemory();		//if no sufficiently large node found in free tree, try defragmenting, returning memory, and searching
+			/*chunk* greatestNode = highestAddress(addressRoot);
+			if(greatestNode != NULL){
+				void* endOfNode = greatestNode->memory + greatestNode->size;
+				while(greatestNode != NULL && endOfNode == heapEnd){
+					removeChunk(greatestNode);
+					intptr_t removeSize = -((intptr_t)(greatestNode->size + sizeof(chunk)));
+					sbrk(removeSize);
+					heapEnd = greatestNode;
+					greatestNode = highestAddress(addressRoot);
+					endOfNode = greatestNode->memory + greatestNode->size;
+				}
+			}*/
 			block = getFreeChunk( s );
 		}
 
@@ -389,7 +448,7 @@
 			for(i = 0; i < c->size; i++){   //c->size is smaller than new size 's'
 				newChunk->memory[i] = c->memory[i];
 			}
-			retVal = (&newChunk->memory[0]);
+			retVal = (newChunk->memory);
 			free(ptr);
 
 			if(retVal == NULL){

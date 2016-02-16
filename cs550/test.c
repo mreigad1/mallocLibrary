@@ -49,10 +49,39 @@
 	chunk* highestAddress(chunk* root){
 		if(root == NULL){
 			return NULL;
-		}else if(root->RightAddress != NULL){
-			return root->RightAddress;
+		}else if(RightAddress != NULL){
+			return RightAddress;
 		}else{
 			return root;
+		}
+	}
+
+	//flattens tree into list, merges nodes, creates new tree
+	void defragmentMemory(){
+		chunk* greatestNode = highestAddress(addressRoot);
+		while(greatestNode != NULL){
+			removeChunk(greatestNode);
+			greatestNode->LeftAddress = greatestNode->RightAddress = NULL;
+			greatestNode->nextAddress = listHead;
+			listHead = greatestNode;
+			greatestNode = highestAddress(addressRoot);
+		}
+		chunk* tmp = listHead;
+		while(tmp != NULL){
+			void* nxt = (void*)(tmp->nextAddress);
+			if((tmp->memory + tmp->size) == nxt){
+				chunk* nextChunk = (chunk*)nxt;
+				tmp->size += (sizeof(chunk) + nextChunk->size);
+				tmp->nextAddress = nextChunk->nextAddress;
+				nextChunk->nextAddress = NULL;
+			}
+			tmp = tmp->nextAddress;
+		}
+		while(listHead != NULL){
+			chunk* toTree = listHead;
+			listHead = toTree->nextAddress;
+			toTree->nextAddress = NULL;
+			insertChunk(toTree);
 		}
 	}
 
@@ -97,23 +126,17 @@
 		if(c == NULL){
 			return 0;
 		}
-		//heapEnd = sbrk(0);
 		void* ptr = c;
 		size_t s = sizeof(chunk) + c->size;
 		void* end = ptr + s;
-
-		int retVal = 0;
-	
-		if(end == heapEnd){	//determine if chunk is to be given back to OS, 
+		if(end == heapEnd){	//determine if chunk is to be given back to OS
 			intptr_t ns = -s;
 			sbrk(ns);
 			heapEnd = ptr;
-			retVal = 2;		//do nothing more if memory returned to system
+			return 2;		//do nothing more if memory returned to system
 		}else{	//not returned to OS, place chunk in tree
-			retVal = addressInsert(c, addressRoot);
+			return addressInsert(c, addressRoot);
 		}
-
-		return retVal;
 	}
 
 	//remove nodes from and place into root
@@ -188,35 +211,6 @@
 		removeAddress(c , addressRoot);
 	}
 
-	//flattens tree into list, merges nodes, creates new tree
-	void defragmentMemory(){
-		chunk* greatestNode = highestAddress(addressRoot);
-		while(greatestNode != NULL){
-			removeChunk(greatestNode);
-			greatestNode->LeftAddress = greatestNode->RightAddress = NULL;
-			greatestNode->nextAddress = listHead;
-			listHead = greatestNode;
-			greatestNode = highestAddress(addressRoot);
-		}
-		chunk* tmp = listHead;
-		while(tmp != NULL){
-			void* nxt = (void*)(tmp->nextAddress);
-			if((tmp->memory + tmp->size) == nxt){
-				chunk* nextChunk = (chunk*)nxt;
-				tmp->size += (sizeof(chunk) + nextChunk->size);
-				tmp->nextAddress = nextChunk->nextAddress;
-				nextChunk->nextAddress = NULL;
-			}
-			tmp = tmp->nextAddress;
-		}
-		while(listHead != NULL){
-			chunk* toTree = listHead;
-			listHead = toTree->nextAddress;
-			toTree->nextAddress = NULL;
-			insertChunk(toTree);
-		}
-	}
-
 	//search tree for large enough chunk, do NOT remove yet
 	chunk* getFreeChunkAux(size_t s, chunk* root){		
 		if(root == NULL){
@@ -288,9 +282,6 @@
 		if(retVal != NULL){
 			heapEnd = sbrk(0);
 			chunk* c = retVal;
-			if(c == (void*)0x17 || &(c->size) == (void*)0x17){
-				breakHere((void*)0x17);
-			}
 			c->size = s;
 		}
 		return retVal;
@@ -328,25 +319,17 @@
 	}
 
 	void free(void *ptr){
+
+		if(ptr == NULL || ptr == (NULL-sizeof(chunk))){
+			breakHere(ptr);
+		}
+
 		if(ptr == NULL){
 			return;
 		}
 		ptr -= sizeof(chunk);
 		chunk* c = (chunk*)ptr;
 		insertChunk(c);
-
-		chunk* greatestNode = highestAddress(addressRoot);
-		if(greatestNode != NULL){
-			void* endOfNode = greatestNode->memory + greatestNode->size;
-			while(greatestNode != NULL && endOfNode == heapEnd){
-				removeChunk(greatestNode);
-				intptr_t removeSize = -((intptr_t)(greatestNode->size + sizeof(chunk)));
-				sbrk(removeSize);
-				heapEnd = greatestNode;
-				greatestNode = highestAddress(addressRoot);
-				endOfNode = greatestNode->memory + greatestNode->size;
-			}
-		}
 	}
 
 	//implemented
@@ -399,3 +382,31 @@
 			return retVal;
 		}
 	}
+
+
+/*int main(){
+	int* arr[TESTNUM];
+	int sizes[TESTNUM];
+	int i;
+
+
+	for(i = 0; i < TESTNUM; i++){
+		arr[i] = malloc(sizeof(int));
+		arr[i][0] = sizeof(int) + sizes[i];
+	}
+
+	for(i = 0; i < TESTNUM; i++){
+		free(arr[i]);
+	}
+
+
+	for(i = 0; i < TESTNUM; i++){
+		arr[i] = malloc(sizeof(int));
+		arr[i][0] = sizeof(int) + i*i + 100;
+	}
+
+	for(i = 0; i < TESTNUM; i++){
+		free(arr[i]);
+	}
+}
+*/
